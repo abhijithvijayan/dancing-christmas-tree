@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Full System Dashboard</title>
+    <title>Physics Debugger</title>
     <style>
         body {
             font-family: 'Courier New', monospace;
@@ -31,19 +31,21 @@
         button#resetBtn:hover { background: #e0a800; }
         button#disconnectBtn { background: #dc3545; border-color: #dc3545; display: none; }
 
-        .legend { display: flex; justify-content: center; gap: 30px; margin-bottom: 10px; font-size: 14px; }
+        .legend { display: flex; justify-content: center; gap: 20px; margin-bottom: 10px; font-size: 13px; flex-wrap: wrap; }
         .dot { width: 10px; height: 10px; display: inline-block; border-radius: 50%; margin-right: 5px; }
-        #tooltip { position: absolute; background: rgba(20, 20, 20, 0.95); border: 1px solid #777; padding: 10px; border-radius: 4px; font-size: 12px; pointer-events: none; display: none; text-align: left; z-index: 1000; min-width: 140px; }
+        #tooltip { position: absolute; background: rgba(20, 20, 20, 0.95); border: 1px solid #777; padding: 10px; border-radius: 4px; font-size: 12px; pointer-events: none; display: none; text-align: left; z-index: 1000; min-width: 160px; }
     </style>
 </head>
 <body>
 
-<h2>🎵 Full System Dashboard</h2>
+<h2>🎵 Physics Debugger</h2>
 
 <div class="legend">
     <span><span class="dot" style="background:#0f0;"></span>Raw Input</span>
-    <span><span class="dot" style="background:#f0f;"></span>Amplitude</span>
-    <span><span class="dot" style="background:#0ff;"></span>Dynamic Max</span>
+    <span><span class="dot" style="background:#FFA500;"></span>LED Bar (Smooth)</span>
+    <span><span class="dot" style="background:#f0f;"></span>Sound Amplitude</span>
+    <span><span class="dot" style="background:#fff;"></span>Peak Dot</span>
+    <span><span class="dot" style="background:#0ff;"></span>Dyn Max</span>
 </div>
 
 <div class="controls">
@@ -75,17 +77,17 @@
 
     let rawData = new Array(Math.floor(rect.width)).fill(512);
     let ampData = new Array(Math.floor(rect.width)).fill(0);
+    let ledData = new Array(Math.floor(rect.width)).fill(0);
+    let peakData = new Array(Math.floor(rect.width)).fill(0);
 
     let port, reader, readableStreamClosed;
     let isPaused = false;
     let inputBuffer = '';
+    let mouseX = -1; let isHovering = false;
 
-    let mouseX = -1;
-    let isHovering = false;
-
-    // DATA VALUES FROM ARDUINO
     let arduinoZero = 512;
     let dynamicMax = 100;
+    const NUM_LEDS = 300;
 
     function draw() {
         ctx.clearRect(0, 0, rect.width, rect.height);
@@ -94,25 +96,17 @@
         let bottomBase = rect.height * 0.75;
         let scaleHeight = rect.height * 0.40;
 
-        // --- 1. DYNAMIC GRID LINES ---
-
-        // A. Draw Zero Point Line (The value sent from Arduino)
-        // We map this value relative to the Top Graph center (512)
+        // --- 1. GRID & REFS ---
         let zeroOffset = (arduinoZero - 512) / 512;
         let zeroY = topCenter - (zeroOffset * scaleHeight);
-
-        ctx.strokeStyle = '#666'; ctx.lineWidth = 1;
-        ctx.setLineDash([5, 5]);
+        ctx.strokeStyle = '#666'; ctx.lineWidth = 1; ctx.setLineDash([5, 5]);
         ctx.beginPath(); ctx.moveTo(0, zeroY); ctx.lineTo(rect.width, zeroY); ctx.stroke(); ctx.setLineDash([]);
 
-        // B. Draw Floor Line
-        ctx.strokeStyle = '#444'; ctx.beginPath(); ctx.moveTo(0, bottomBase); ctx.lineTo(rect.width, bottomBase); ctx.stroke();
-
-        // C. Draw Dynamic Max Line (Cyan)
-        // This sits on the Bottom Graph
         let maxY = bottomBase - ((dynamicMax / 1023) * scaleHeight);
         ctx.strokeStyle = '#0ff'; ctx.lineWidth = 1; ctx.setLineDash([2, 2]);
         ctx.beginPath(); ctx.moveTo(0, maxY); ctx.lineTo(rect.width, maxY); ctx.stroke(); ctx.setLineDash([]);
+
+        ctx.strokeStyle = '#444'; ctx.beginPath(); ctx.moveTo(0, bottomBase); ctx.lineTo(rect.width, bottomBase); ctx.stroke();
 
         // --- 2. RAW SIGNAL (Green) ---
         ctx.beginPath(); ctx.strokeStyle = '#00ff00'; ctx.lineWidth = 1;
@@ -123,24 +117,47 @@
         }
         ctx.stroke();
 
-        // --- 3. AMPLITUDE (Pink) ---
-        ctx.beginPath(); ctx.fillStyle = 'rgba(255, 0, 255, 0.2)'; ctx.strokeStyle = '#ff00ff'; ctx.lineWidth = 2;
+        // --- 3. LED BAR (Orange) - DRAWN FIRST ---
+        ctx.beginPath();
+        ctx.fillStyle = 'rgba(255, 165, 0, 0.4)'; // More transparent
+        ctx.strokeStyle = 'rgba(255, 165, 0, 0.8)';
+        ctx.lineWidth = 1;
         ctx.moveTo(0, bottomBase);
-        for (let i = 0; i < ampData.length; i++) {
-            let h = (ampData[i] / 1023) * scaleHeight;
+        for (let i = 0; i < ledData.length; i++) {
+            let h = (ledData[i] / NUM_LEDS) * scaleHeight;
             let y = bottomBase - h;
             ctx.lineTo(i, y);
         }
-        ctx.lineTo(rect.width, bottomBase); ctx.lineTo(0, bottomBase); ctx.fill(); ctx.stroke();
+        ctx.lineTo(rect.width, bottomBase);
+        ctx.fill();
+        ctx.stroke();
 
-        // --- 4. INFO BOXES ---
+        // --- 4. AMPLITUDE (Pink) - DRAWN ON TOP ---
+        ctx.beginPath();
+        // No Fill, just a bright line
+        ctx.strokeStyle = '#ff00ff';
+        ctx.lineWidth = 2; // Thicker line
+        for (let i = 0; i < ampData.length; i++) {
+            let h = (ampData[i] / 1023) * scaleHeight;
+            let y = bottomBase - h;
+            if (i === 0) ctx.moveTo(i, y); else ctx.lineTo(i, y);
+        }
+        ctx.stroke();
 
-        // Box 1: Zero Point
+        // --- 5. PEAK DOT (White) ---
+        ctx.beginPath(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
+        for (let i = 0; i < peakData.length; i++) {
+            let h = (peakData[i] / NUM_LEDS) * scaleHeight;
+            let y = bottomBase - h;
+            if (i === 0) ctx.moveTo(i, y); else ctx.lineTo(i, y);
+        }
+        ctx.stroke();
+
+        // --- INFO BOXES ---
         ctx.fillStyle = 'rgba(0, 0, 0, 0.7)'; ctx.fillRect(10, 10, 200, 24);
         ctx.fillStyle = '#bbb'; ctx.font = '12px Courier New'; ctx.textAlign = "left";
         ctx.fillText("Zero Point (Bias): " + arduinoZero, 20, 26);
 
-        // Box 2: Dynamic Ceiling
         let labelText = "Auto-Scaling Max: " + dynamicMax;
         let textWidth = ctx.measureText(labelText).width;
         let boxX = rect.width - textWidth - 30;
@@ -148,23 +165,26 @@
         ctx.fillStyle = '#0ff'; ctx.font = 'bold 12px Courier New'; ctx.textAlign = "left";
         ctx.fillText(labelText, boxX, 26);
 
-        // --- 5. TOOLTIP ---
+        // --- TOOLTIP ---
         if (isHovering && mouseX >= 0 && mouseX < rawData.length) {
             let index = Math.floor(mouseX);
             let rVal = rawData[index];
             let aVal = ampData[index];
+            let lVal = ledData[index];
+            let pVal = peakData[index];
 
             if(rVal !== undefined) {
                 ctx.strokeStyle = '#fff'; ctx.lineWidth = 1; ctx.setLineDash([2, 2]); ctx.beginPath(); ctx.moveTo(mouseX, 0); ctx.lineTo(mouseX, rect.height); ctx.stroke(); ctx.setLineDash([]);
-                let diff = rVal - arduinoZero;
-                let sign = diff >= 0 ? "+" : "";
 
                 tooltip.innerHTML = `
                         <div style="color:#888; border-bottom:1px solid #444; margin-bottom:4px;">
                             Bias: <b>${arduinoZero}</b> | Max: <b style="color:#0ff">${dynamicMax}</b>
                         </div>
-                        <span style="color:#0f0">●</span> Raw: <b style="color:#fff">${rVal}</b> <span style="color:#aaa; font-size:10px">(${sign}${diff})</span><br>
-                        <span style="color:#f0f">●</span> Amp: <b style="color:#fff">${aVal}</b>
+                        <span style="color:#0f0">●</span> Raw: <b style="color:#fff">${rVal}</b><br>
+                        <span style="color:#f0f">●</span> Sound: <b style="color:#fff">${aVal}</b><br>
+                        <hr style="border-color:#333; margin:3px 0">
+                        <span style="color:#FFA500">●</span> LED Bar: <b>${lVal}</b> / 300<br>
+                        <span style="color:#fff">●</span> Peak: <b>${pVal}</b>
                     `;
             }
         }
@@ -179,16 +199,19 @@
         inputBuffer = lines.pop();
         for (let line of lines) {
             let parts = line.trim().split(',');
-            // Expecting 4 values now
-            if (parts.length === 4) {
+            if (parts.length === 6) {
                 let r = parseInt(parts[0]);
                 let a = parseInt(parts[1]);
                 let m = parseInt(parts[2]);
                 let z = parseInt(parts[3]);
+                let l = parseInt(parts[4]);
+                let p = parseInt(parts[5]);
 
-                if (!isNaN(r) && !isNaN(a)) {
+                if (!isNaN(r) && !isNaN(a) && !isNaN(l) && !isNaN(p)) {
                     rawData.push(r); rawData.shift();
                     ampData.push(a); ampData.shift();
+                    ledData.push(l); ledData.shift();
+                    peakData.push(p); peakData.shift();
                 }
                 if (!isNaN(m)) dynamicMax = m;
                 if (!isNaN(z)) arduinoZero = z;
@@ -200,6 +223,8 @@
     resetBtn.addEventListener('click', () => {
         rawData.fill(512);
         ampData.fill(0);
+        ledData.fill(0);
+        peakData.fill(0);
     });
 
     canvas.addEventListener('mousemove', (e) => {

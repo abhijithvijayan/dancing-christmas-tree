@@ -105,13 +105,14 @@ void loop() {
 
     FastLED.show();
 
-    // SEND 4 VALUES TO VISUALIZER
-    // Format: "530,20,180,528" (Raw, Amp, MaxVol, ZeroPoint)
+    // SEND 6 VALUES
+    // Order: Raw, Amp, MaxVol, Zero, LedHeight, PeakPos
     Serial.print(raw); Serial.print(",");
     Serial.print(amplitude); Serial.print(",");
     Serial.print(maxVol); Serial.print(",");
-    Serial.println(zeroPoint);
+    Serial.print(zeroPoint); Serial.print(",");
+    Serial.print(currentHeight); Serial.print(",");
+    Serial.println(peakPosition);
 
-    // delay(2);
-    delay(10);
+    delay(2);
 }
