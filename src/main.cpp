@@ -1,19 +1,17 @@
 #include <Arduino.h>
 #include <FastLED.h>
 
-// --- CONFIGURATION ---
 #define LED_PIN     5
 #define AUDIO_PIN   A0
 #define NUM_LEDS    300
-#define BRIGHTNESS  255
 #define LED_TYPE    WS2812B
 #define COLOR_ORDER GRB
-
-// --- SENSITIVITY ---
-#define SENSITIVITY 100   // Max expected volume range
-#define NOISE_GATE  3    // Ignore small static
+#define BRIGHTNESS  255
+#define NOISE_GATE  15 // Filter out static noise
 #define GAIN_FACTOR 3
-#define PEAK_FALL   1     // Falling speed of the dot
+#define PEAK_FALL   1 // How fast the peak led should fall
+#define MIN_CEILING 80
+#define DECAY_RATE  100
 
 CRGB leds[NUM_LEDS];
 
@@ -21,86 +19,99 @@ int zeroPoint = 512;
 int currentHeight = 0;
 int peakPosition = 0;
 uint8_t hue = 0;
+int maxVol = 100; // Dynamic Ceiling
 
 void setup() {
     Serial.begin(115200);
     delay(1000);
 
-    // Setup LEDs
     FastLED.addLeds<LED_TYPE, LED_PIN, COLOR_ORDER>(leds, NUM_LEDS).setCorrection(TypicalLEDStrip);
     FastLED.setBrightness(BRIGHTNESS);
     FastLED.setMaxPowerInVoltsAndMilliamps(5, 8000);
     FastLED.clear(true);
 
-    Serial.println("--- STARTING CALIBRATION ---");
     long sum = 0;
-    for(int i = 0; i < 100; i++) {
-        sum += analogRead(AUDIO_PIN);
-        delay(2);
-    }
-    zeroPoint = sum / 100;
-    Serial.print("Calibration Complete. Zero Point set to: ");
-    Serial.println(zeroPoint);
-    Serial.println("----------------------------");
-    delay(1000);
+    for(int i=0; i<200; i++) { sum += analogRead(AUDIO_PIN); delay(2); }
+    zeroPoint = sum / 200;
 }
 
 void loop() {
-    // READ AUDIO
     int raw = analogRead(AUDIO_PIN);
-
-    // Calculate Loudness (Amplitude)
     int amplitude = abs(raw - zeroPoint);
     amplitude = amplitude * GAIN_FACTOR;
 
-    // Filter Noise
     if (amplitude < NOISE_GATE) {
         amplitude = 0;
     }
 
-    // CALCULATE HEIGHT
-    int targetHeight = map(amplitude, 0, SENSITIVITY, 0, NUM_LEDS);
-    targetHeight = constrain(targetHeight, 0, NUM_LEDS);
-
-    // Smoothing
-    if (targetHeight > currentHeight) {
-        currentHeight = targetHeight;
-    } else {
-        currentHeight = (currentHeight * 10 + targetHeight) / 11;
+    // Adjust the max ceiling based on the amplitude
+    // If a loud chorus hits (volume 200), ceiling is now 200.
+    if (amplitude > maxVol) {
+        maxVol = amplitude;
     }
 
-    // Peak Dot Logic
-    if (currentHeight > peakPosition) {
-        peakPosition = currentHeight;
-    } else {
-        EVERY_N_MILLISECONDS(30) {
-            if (peakPosition > 0) peakPosition -= PEAK_FALL;
+    // Every 100ms, lowers the ceiling by 1.
+    // If the next song is quiet (max volume 100), the ceiling will slowly drift down from 200 to 100,
+    // ensuring the quiet song eventually fills the whole tree again.
+    EVERY_N_MILLISECONDS(DECAY_RATE) {
+        if (maxVol > MIN_CEILING) {
+            maxVol--;
         }
     }
 
-    // --- DEBUG LOGGING ---
-    // This will print: "Raw: 530 | Amp: 45 | Height: 120" for Arduino Serial Plotter graph
-    Serial.print("Raw:");
-    Serial.print(raw);
-    Serial.print(" \t| Amp:"); // \t creates a tab space
-    Serial.print(amplitude);
-    Serial.print(" \t| Height:");
-    Serial.println(currentHeight);
+    // translates the amplitude to the leds relative to the ceiling value
+    int targetHeight = map(amplitude, 0, maxVol, 0, NUM_LEDS);
+    targetHeight = constrain(targetHeight, 0, NUM_LEDS);
 
-    // DRAW
-    FastLED.clear();
-    hue++;
-
-    // Draw Bar
-    for (int i = 0; i < currentHeight; i++) {
-        leds[i] = CHSV(hue + (i * 2), 255, 255);
+    if (targetHeight > currentHeight) {
+        currentHeight = targetHeight; // Rise Instantly
+    }
+    else {
+        currentHeight = (currentHeight * 15 + targetHeight) / 16;// Fall Slowly
     }
 
-    // Draw Peak
-    if (peakPosition < NUM_LEDS && peakPosition > 0) {
+    // When the music pushes the bar up, it kicks the dot up too
+    if (currentHeight > peakPosition) {
+        peakPosition = currentHeight;
+    }
+    else {
+        // When the bar drops, the dot stays in the air for a split second before falling down slowly (1 pixel every 30ms).
+        EVERY_N_MILLISECONDS(30) {
+            if (peakPosition > 0) {
+                peakPosition -= PEAK_FALL;
+            }
+        }
+    }
+
+    // Ensure it never goes below 0 or above 299
+    peakPosition = constrain(peakPosition, 0, NUM_LEDS - 1);
+
+    FastLED.clear();
+
+    hue++; // Color Cycle
+    for (int i = 0; i < currentHeight; i++) {
+        // CHSV creates the rainbow
+        leds[i] = CHSV(
+        // hue + (i * 2) means every pixel is a slightly different color than the one below it
+        hue + (i * 2),
+        255,
+        255
+        );
+    }
+
+    if (peakPosition > 0) {
         leds[peakPosition] = CRGB::White;
     }
 
     FastLED.show();
-    delay(2);
+
+    // SEND 4 VALUES TO VISUALIZER
+    // Format: "530,20,180,528" (Raw, Amp, MaxVol, ZeroPoint)
+    Serial.print(raw); Serial.print(",");
+    Serial.print(amplitude); Serial.print(",");
+    Serial.print(maxVol); Serial.print(",");
+    Serial.println(zeroPoint);
+
+    // delay(2);
+    delay(10);
 }
