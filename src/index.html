@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Full System Dashboard</title>
+    <style>
+        body {
+            font-family: 'Courier New', monospace;
+            background: #111;
+            color: #fff;
+            padding: 20px;
+            text-align: center;
+        }
+        canvas {
+            background: #000;
+            border: 2px solid #333;
+            margin-top: 10px;
+            width: 90%;
+            height: 500px;
+            border-radius: 4px;
+            cursor: crosshair;
+        }
+        .controls { display: flex; justify-content: center; gap: 15px; margin-bottom: 15px; }
+        button { padding: 12px 24px; font-size: 16px; cursor: pointer; background: #333; color: white; border: 1px solid #555; border-radius: 5px; transition: all 0.2s; }
+        button:hover { background: #444; }
+
+        button#connectBtn { background: #007bff; border-color: #007bff; }
+        button#connectBtn:hover { background: #0056b3; }
+        button#resetBtn { background: #d39e00; border-color: #c69500; color: #000; }
+        button#resetBtn:hover { background: #e0a800; }
+        button#disconnectBtn { background: #dc3545; border-color: #dc3545; display: none; }
+
+        .legend { display: flex; justify-content: center; gap: 30px; margin-bottom: 10px; font-size: 14px; }
+        .dot { width: 10px; height: 10px; display: inline-block; border-radius: 50%; margin-right: 5px; }
+        #tooltip { position: absolute; background: rgba(20, 20, 20, 0.95); border: 1px solid #777; padding: 10px; border-radius: 4px; font-size: 12px; pointer-events: none; display: none; text-align: left; z-index: 1000; min-width: 140px; }
+    </style>
+</head>
+<body>
+
+<h2>🎵 Full System Dashboard</h2>
+
+<div class="legend">
+    <span><span class="dot" style="background:#0f0;"></span>Raw Input</span>
+    <span><span class="dot" style="background:#f0f;"></span>Amplitude</span>
+    <span><span class="dot" style="background:#0ff;"></span>Dynamic Max</span>
+</div>
+
+<div class="controls">
+    <button id="connectBtn">🔌 CONNECT</button>
+    <button id="pauseBtn">⏸ PAUSE</button>
+    <button id="resetBtn">🗑️ RESET CHART</button>
+    <button id="disconnectBtn">❌ DISCONNECT</button>
+</div>
+
+<div id="status">Status: Disconnected</div>
+<div id="tooltip"></div>
+<canvas id="chart"></canvas>
+
+<script>
+    const connectBtn = document.getElementById('connectBtn');
+    const pauseBtn = document.getElementById('pauseBtn');
+    const resetBtn = document.getElementById('resetBtn');
+    const disconnectBtn = document.getElementById('disconnectBtn');
+    const statusDisplay = document.getElementById('status');
+    const canvas = document.getElementById('chart');
+    const tooltip = document.getElementById('tooltip');
+    const ctx = canvas.getContext('2d');
+
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    ctx.scale(dpr, dpr);
+
+    let rawData = new Array(Math.floor(rect.width)).fill(512);
+    let ampData = new Array(Math.floor(rect.width)).fill(0);
+
+    let port, reader, readableStreamClosed;
+    let isPaused = false;
+    let inputBuffer = '';
+
+    let mouseX = -1;
+    let isHovering = false;
+
+    // DATA VALUES FROM ARDUINO
+    let arduinoZero = 512;
+    let dynamicMax = 100;
+
+    function draw() {
+        ctx.clearRect(0, 0, rect.width, rect.height);
+
+        let topCenter = rect.height * 0.25;
+        let bottomBase = rect.height * 0.75;
+        let scaleHeight = rect.height * 0.40;
+
+        // --- 1. DYNAMIC GRID LINES ---
+
+        // A. Draw Zero Point Line (The value sent from Arduino)
+        // We map this value relative to the Top Graph center (512)
+        let zeroOffset = (arduinoZero - 512) / 512;
+        let zeroY = topCenter - (zeroOffset * scaleHeight);
+
+        ctx.strokeStyle = '#666'; ctx.lineWidth = 1;
+        ctx.setLineDash([5, 5]);
+        ctx.beginPath(); ctx.moveTo(0, zeroY); ctx.lineTo(rect.width, zeroY); ctx.stroke(); ctx.setLineDash([]);
+
+        // B. Draw Floor Line
+        ctx.strokeStyle = '#444'; ctx.beginPath(); ctx.moveTo(0, bottomBase); ctx.lineTo(rect.width, bottomBase); ctx.stroke();
+
+        // C. Draw Dynamic Max Line (Cyan)
+        // This sits on the Bottom Graph
+        let maxY = bottomBase - ((dynamicMax / 1023) * scaleHeight);
+        ctx.strokeStyle = '#0ff'; ctx.lineWidth = 1; ctx.setLineDash([2, 2]);
+        ctx.beginPath(); ctx.moveTo(0, maxY); ctx.lineTo(rect.width, maxY); ctx.stroke(); ctx.setLineDash([]);
+
+        // --- 2. RAW SIGNAL (Green) ---
+        ctx.beginPath(); ctx.strokeStyle = '#00ff00'; ctx.lineWidth = 1;
+        for (let i = 0; i < rawData.length; i++) {
+            let normalized = (rawData[i] - 512) / 512;
+            let y = topCenter - (normalized * scaleHeight);
+            if (i === 0) ctx.moveTo(i, y); else ctx.lineTo(i, y);
+        }
+        ctx.stroke();
+
+        // --- 3. AMPLITUDE (Pink) ---
+        ctx.beginPath(); ctx.fillStyle = 'rgba(255, 0, 255, 0.2)'; ctx.strokeStyle = '#ff00ff'; ctx.lineWidth = 2;
+        ctx.moveTo(0, bottomBase);
+        for (let i = 0; i < ampData.length; i++) {
+            let h = (ampData[i] / 1023) * scaleHeight;
+            let y = bottomBase - h;
+            ctx.lineTo(i, y);
+        }
+        ctx.lineTo(rect.width, bottomBase); ctx.lineTo(0, bottomBase); ctx.fill(); ctx.stroke();
+
+        // --- 4. INFO BOXES ---
+
+        // Box 1: Zero Point
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)'; ctx.fillRect(10, 10, 200, 24);
+        ctx.fillStyle = '#bbb'; ctx.font = '12px Courier New'; ctx.textAlign = "left";
+        ctx.fillText("Zero Point (Bias): " + arduinoZero, 20, 26);
+
+        // Box 2: Dynamic Ceiling
+        let labelText = "Auto-Scaling Max: " + dynamicMax;
+        let textWidth = ctx.measureText(labelText).width;
+        let boxX = rect.width - textWidth - 30;
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)'; ctx.fillRect(boxX - 10, 10, textWidth + 20, 24);
+        ctx.fillStyle = '#0ff'; ctx.font = 'bold 12px Courier New'; ctx.textAlign = "left";
+        ctx.fillText(labelText, boxX, 26);
+
+        // --- 5. TOOLTIP ---
+        if (isHovering && mouseX >= 0 && mouseX < rawData.length) {
+            let index = Math.floor(mouseX);
+            let rVal = rawData[index];
+            let aVal = ampData[index];
+
+            if(rVal !== undefined) {
+                ctx.strokeStyle = '#fff'; ctx.lineWidth = 1; ctx.setLineDash([2, 2]); ctx.beginPath(); ctx.moveTo(mouseX, 0); ctx.lineTo(mouseX, rect.height); ctx.stroke(); ctx.setLineDash([]);
+                let diff = rVal - arduinoZero;
+                let sign = diff >= 0 ? "+" : "";
+
+                tooltip.innerHTML = `
+                        <div style="color:#888; border-bottom:1px solid #444; margin-bottom:4px;">
+                            Bias: <b>${arduinoZero}</b> | Max: <b style="color:#0ff">${dynamicMax}</b>
+                        </div>
+                        <span style="color:#0f0">●</span> Raw: <b style="color:#fff">${rVal}</b> <span style="color:#aaa; font-size:10px">(${sign}${diff})</span><br>
+                        <span style="color:#f0f">●</span> Amp: <b style="color:#fff">${aVal}</b>
+                    `;
+            }
+        }
+        requestAnimationFrame(draw);
+    }
+    draw();
+
+    // --- DATA PROCESSING ---
+    function processData(text) {
+        inputBuffer += text;
+        let lines = inputBuffer.split('\n');
+        inputBuffer = lines.pop();
+        for (let line of lines) {
+            let parts = line.trim().split(',');
+            // Expecting 4 values now
+            if (parts.length === 4) {
+                let r = parseInt(parts[0]);
+                let a = parseInt(parts[1]);
+                let m = parseInt(parts[2]);
+                let z = parseInt(parts[3]);
+
+                if (!isNaN(r) && !isNaN(a)) {
+                    rawData.push(r); rawData.shift();
+                    ampData.push(a); ampData.shift();
+                }
+                if (!isNaN(m)) dynamicMax = m;
+                if (!isNaN(z)) arduinoZero = z;
+            }
+        }
+    }
+
+    // --- EVENTS ---
+    resetBtn.addEventListener('click', () => {
+        rawData.fill(512);
+        ampData.fill(0);
+    });
+
+    canvas.addEventListener('mousemove', (e) => {
+        const rect = canvas.getBoundingClientRect(); mouseX = e.clientX - rect.left; isHovering = true; tooltip.style.left = (e.pageX + 15) + 'px'; tooltip.style.top = (e.pageY + 15) + 'px'; tooltip.style.display = 'block';
+    });
+    canvas.addEventListener('mouseleave', () => { isHovering = false; tooltip.style.display = 'none'; });
+    pauseBtn.addEventListener('click', () => { isPaused = !isPaused; pauseBtn.textContent = isPaused ? "▶ RESUME" : "⏸ PAUSE"; pauseBtn.classList.toggle('active'); });
+
+    connectBtn.addEventListener('click', async () => {
+        if (!navigator.serial) return alert("Use Chrome/Edge");
+        try {
+            port = await navigator.serial.requestPort(); await port.open({ baudRate: 115200 });
+            statusDisplay.textContent = "Status: Connected!"; statusDisplay.style.color = "#0f0"; connectBtn.style.display = 'none'; disconnectBtn.style.display = 'inline-block';
+            const textDecoder = new TextDecoderStream(); const readableStreamClosed = port.readable.pipeTo(textDecoder.writable); reader = textDecoder.readable.getReader();
+            while (true) { const { value, done } = await reader.read(); if (done) break; if (!isPaused) processData(value); }
+        } catch (err) { console.error(err); resetUI(); }
+    });
+    disconnectBtn.addEventListener('click', async () => { if (reader) await reader.cancel(); if (port) await port.close(); resetUI(); });
+    function resetUI() { connectBtn.style.display = 'inline-block'; disconnectBtn.style.display = 'none'; statusDisplay.textContent = "Status: Disconnected"; statusDisplay.style.color = "#fff"; }
+</script>
+</body>
+</html>
