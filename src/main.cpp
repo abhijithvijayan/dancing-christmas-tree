@@ -6,7 +6,7 @@
 #define NUM_LEDS    300
 #define LED_TYPE    WS2812B
 #define COLOR_ORDER GRB
-#define BRIGHTNESS  255
+#define BRIGHTNESS  100 // Max: 255
 #define NOISE_GATE  15 // Filter out static noise
 #define GAIN_FACTOR 3
 #define PEAK_FALL   1 // How fast the peak led should fall
