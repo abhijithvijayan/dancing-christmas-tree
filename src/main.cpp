@@ -10,7 +10,7 @@
 #define NOISE_GATE  15 // Filter out static noise
 #define GAIN_FACTOR 3
 #define PEAK_FALL   1 // How fast the peak led should fall
-#define MIN_CEILING 80
+#define MIN_CEILING 120
 #define DECAY_RATE  100
 
 CRGB leds[NUM_LEDS];
@@ -33,12 +33,28 @@ void setup() {
     long sum = 0;
     for(int i=0; i<200; i++) { sum += analogRead(AUDIO_PIN); delay(2); }
     zeroPoint = sum / 200;
+
+    // If calibration sees "dead air" (1 or 2), force a safe default
+    if (zeroPoint < 50) {
+        zeroPoint = 512;
+    }
 }
 
 void loop() {
     int raw = analogRead(AUDIO_PIN);
-    int amplitude = abs(raw - zeroPoint);
-    amplitude = amplitude * GAIN_FACTOR;
+    int amplitude = 0;
+
+    // Only calculate volume if the input is active (> 50)
+    if (raw > 50) {
+        amplitude = abs(raw - zeroPoint);
+        amplitude = amplitude * GAIN_FACTOR;
+    } else {
+        // when raw drops below 50, assume input is OFF
+        amplitude = 0;
+        // Force maxVol back to normal immediately.
+        // This erases any spike that happened when voltage dropped to 0
+        maxVol = 100;
+    }
 
     if (amplitude < NOISE_GATE) {
         amplitude = 0;
