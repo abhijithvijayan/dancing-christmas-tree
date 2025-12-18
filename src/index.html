@@ -58,6 +58,10 @@
     <button id="disconnectBtn">❌ DISCONNECT</button>
 </div>
 
+<div id="modeDisplay" style="margin: 10px; font-weight: bold; font-size: 18px; color: #888;">
+    MODE: <span id="modeText">WAITING...</span>
+</div>
+
 <div id="status">Status: Disconnected</div>
 <div id="tooltip"></div>
 <canvas id="chart"></canvas>
@@ -256,9 +260,10 @@
         inputBuffer = lines.pop();
         for (let line of lines) {
             let parts = line.trim().split(',');
-            if (parts.length === 6) {
+            if (parts.length === 7) {
                 let r = parseInt(parts[0]); let a = parseInt(parts[1]); let m = parseInt(parts[2]);
                 let z = parseInt(parts[3]); let l = parseInt(parts[4]); let p = parseInt(parts[5]);
+                let mode = parseInt(parts[6]);
                 if (!isNaN(r)) {
                     rawData.push(r); rawData.shift(); ampData.push(a); ampData.shift();
                     ledData.push(l); ledData.shift(); peakData.push(p); peakData.shift();
@@ -276,6 +281,17 @@
                         if (maxLedLit === 0) minLedLit = l;
                         if (l > maxLedLit) maxLedLit = l;
                         if (l < minLedLit) minLedLit = l;
+                    }
+
+                    const modeText = document.getElementById('modeText');
+                    if (mode === 1) {
+                        modeText.textContent = "🎵 MUSIC VISUALIZER";
+                        modeText.style.color = "#0f0"; // Green
+                        modeText.style.textShadow = "0 0 10px #0f0";
+                    } else {
+                        modeText.textContent = "✨ STATIC EFFECTS";
+                        modeText.style.color = "#ffa500"; // Orange
+                        modeText.style.textShadow = "0 0 10px #ffa500";
                     }
                 }
             }

@@ -4,6 +4,7 @@
 
 #define LED_PIN     5
 #define AUDIO_PIN   A0
+#define SWITCH_PIN  2
 #define NUM_LEDS    300
 #define LED_TYPE    WS2812B
 #define COLOR_ORDER GRB
@@ -61,6 +62,8 @@ void setup() {
 
     matrix.begin();
 
+    pinMode(SWITCH_PIN, INPUT_PULLUP);
+
     long sum = 0;
     for(int i=0; i<200; i++) { sum += analogRead(AUDIO_PIN); delay(2); }
     zeroPoint = sum / 200;
@@ -75,8 +78,10 @@ void loop() {
     int raw = analogRead(AUDIO_PIN);
     int amplitude = 0;
 
+    bool musicMode = digitalRead(SWITCH_PIN) == HIGH;
+
     // Only calculate volume if the input is active (> 50)
-    if (raw > 50) {
+    if (musicMode && raw > 50) {
         // -----------------------------
         // MODE A: MUSIC VISUALIZER
         // -----------------------------
@@ -353,7 +358,8 @@ void loop() {
     Serial.print(maxVol); Serial.print(",");
     Serial.print(zeroPoint); Serial.print(",");
     Serial.print(currentHeight); Serial.print(",");
-    Serial.println(peakPosition);
+    Serial.print(peakPosition); Serial.print(",");
+    Serial.println(musicMode ? 1 : 0);
 }
 
 // ==========================================
