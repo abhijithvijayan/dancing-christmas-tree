@@ -1,5 +1,6 @@
 #include <Arduino.h>
-#include <FastLED.h>
+#include "Arduino_LED_Matrix.h" // <--- MUST BE FIRST to avoid conflict
+#include <FastLED.h>            // <--- MUST BE SECOND
 
 #define LED_PIN     5
 #define AUDIO_PIN   A0
@@ -14,12 +15,26 @@
 #define DECAY_RATE  100
 
 CRGB leds[NUM_LEDS];
+ArduinoLEDMatrix matrix;
 
 int zeroPoint = 512;
 int currentHeight = 0;
 int peakPosition = 0;
 uint8_t hue = 0;
 int maxVol = 100; // Dynamic Ceiling
+
+// --- MATRIX BUFFER ---
+// The Uno R4 uses a grid of 8 rows x 12 columns
+uint8_t frame[8][12] = {
+  { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+  { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+  { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+  { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+  { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+  { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+  { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+  { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }
+};
 
 void setup() {
     Serial.begin(115200);
@@ -29,6 +44,8 @@ void setup() {
     FastLED.setBrightness(BRIGHTNESS);
     FastLED.setMaxPowerInVoltsAndMilliamps(5, 8000);
     FastLED.clear(true);
+
+    matrix.begin();
 
     long sum = 0;
     for(int i=0; i<200; i++) { sum += analogRead(AUDIO_PIN); delay(2); }
@@ -121,8 +138,31 @@ void loop() {
 
     FastLED.show();
 
-    // SEND 6 VALUES
-    // Order: Raw, Amp, MaxVol, Zero, LedHeight, PeakPos
+    // Map volume to 0-8 (Matrix Height)
+    int matrixHeight = map(amplitude, 0, maxVol, 0, 8);
+    matrixHeight = constrain(matrixHeight, 0, 8);
+
+    // Clear Frame
+    for(int y=0; y<8; y+=1) {
+        for(int x=0; x<12; x++) {
+            frame[y][x] = 0;
+        }
+    }
+
+    // Fill Frame (Bottom Up)
+    // Note: On R4 Matrix, row 0 is top, row 7 is bottom.
+    for (int y = 0; y < matrixHeight; y+=1) {
+        // We start drawing from row 7 (bottom) and go up
+        int drawRow = 7 - y;
+        for(int x=0; x<12; x++) {
+            frame[drawRow][x] = 1; // Turn pixel ON
+        }
+    }
+
+    // Push to Matrix
+    matrix.renderBitmap(frame, 8, 12);
+
+    // --- SERIAL DATA ---
     Serial.print(raw); Serial.print(",");
     Serial.print(amplitude); Serial.print(",");
     Serial.print(maxVol); Serial.print(",");
