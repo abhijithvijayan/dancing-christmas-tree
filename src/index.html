@@ -17,7 +17,7 @@
             border: 2px solid #333;
             margin-top: 10px;
             width: 90%;
-            height: 500px;
+            height: 600px;
             border-radius: 4px;
             cursor: crosshair;
         }
@@ -45,10 +45,10 @@
 
 <div class="legend">
     <span><span class="dot" style="background:#0f0;"></span>Raw Input</span>
-    <span><span class="dot" style="background:#FFA500;"></span>LED Bar</span>
     <span><span class="dot" style="background:#f0f;"></span>Amplitude</span>
-    <span><span class="dot" style="background:#fff;"></span>Peak Dot</span>
     <span><span class="dot" style="background:#0ff;"></span>Dyn Max</span>
+    <span><span class="dot" style="background:#FFA500;"></span>LED Bar</span>
+    <span><span class="dot" style="background:#fff;"></span>Peak Dot</span>
 </div>
 
 <div class="controls">
@@ -78,7 +78,6 @@
     canvas.height = rect.height * dpr;
     ctx.scale(dpr, dpr);
 
-    // --- DATA ARRAYS ---
     let rawData = new Array(Math.floor(rect.width)).fill(512);
     let ampData = new Array(Math.floor(rect.width)).fill(0);
     let ledData = new Array(Math.floor(rect.width)).fill(0);
@@ -91,12 +90,10 @@
     let inputBuffer = '';
     let mouseX = -1; let isHovering = false;
 
-    // Current "Live" Values
     let currentBias = 512;
     let currentMax = 100;
     const NUM_LEDS = 300;
 
-    // STATS
     let currentLedLit = 0;
     let maxLedLit = 0;
     let minLedLit = NUM_LEDS;
@@ -104,87 +101,125 @@
     function draw() {
         ctx.clearRect(0, 0, rect.width, rect.height);
 
-        let topCenter = rect.height * 0.30;
-        let bottomBase = rect.height * 0.85;
-        let scaleHeight = rect.height * 0.40;
+        // Zone 1 (Raw): 15%
+        // Zone 2 (Amp): 30%
+        // Zone 3 (LED): 55%
 
-        // --- GRID & REFS ---
-        // Use current live bias for the grid line
+        let h1 = rect.height * 0.15;
+        let h2 = rect.height * 0.30;
+        let h3 = rect.height * 0.55;
+
+        // Define "Floors" (Y-coordinates where each zone ends)
+        let floor1 = h1;
+        let floor2 = h1 + h2;
+        let floor3 = h1 + h2 + h3; // Effectively rect.height
+
+        // Define "Drawing Scales" (Padding of 10% on top/bottom inside each zone)
+        let scale1 = h1 * 0.8;
+        let scale2 = h2 * 0.8;
+        let scale3 = h3 * 0.9; // Give LED bar 90% space
+
+        // Define "Base Lines" (Where 0 sits visually)
+        let base1 = floor1 - (h1 * 0.1); // 10% padding from bottom of zone
+        let base2 = floor2 - (h2 * 0.1);
+        let base3 = floor3 - (h3 * 0.05); // 5% padding from bottom
+
+        // --- DIVIDERS ---
+        ctx.strokeStyle = '#333'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(0, floor1); ctx.lineTo(rect.width, floor1); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0, floor2); ctx.lineTo(rect.width, floor2); ctx.stroke();
+
+
+        // --- ZONE 1: RAW INPUT (Green) ---
+        // Bias Grid Line
         let zeroOffset = (currentBias - 512) / 512;
-        let zeroY = topCenter - (zeroOffset * scaleHeight);
-        ctx.strokeStyle = '#666'; ctx.lineWidth = 1; ctx.setLineDash([5, 5]);
+        // Center of Zone 1 is (h1 / 2)
+        let zeroY = (h1 / 2) - (zeroOffset * (scale1 / 2));
+
+        ctx.strokeStyle = '#444'; ctx.setLineDash([5, 5]);
         ctx.beginPath(); ctx.moveTo(0, zeroY); ctx.lineTo(rect.width, zeroY); ctx.stroke(); ctx.setLineDash([]);
 
-        // Use current live max for the grid line
-        let maxY = bottomBase - ((currentMax / 1023) * scaleHeight);
-        ctx.strokeStyle = '#0ff'; ctx.lineWidth = 1; ctx.setLineDash([2, 2]);
-        ctx.beginPath(); ctx.moveTo(0, maxY); ctx.lineTo(rect.width, maxY); ctx.stroke(); ctx.setLineDash([]);
-
-        ctx.strokeStyle = '#444'; ctx.beginPath(); ctx.moveTo(0, bottomBase); ctx.lineTo(rect.width, bottomBase); ctx.stroke();
-
-        // --- RAW SIGNAL (Green) ---
         ctx.beginPath(); ctx.strokeStyle = '#00ff00'; ctx.lineWidth = 1;
         for (let i = 0; i < rawData.length; i++) {
-            let normalized = (rawData[i] - 512) / 512;
-            let y = topCenter - (normalized * scaleHeight);
+            let normalized = rawData[i] / 1023;
+            let y = (floor1 - (h1 * 0.1)) - (normalized * scale1); // Base1 - mapped height
             if (i === 0) ctx.moveTo(i, y); else ctx.lineTo(i, y);
         }
         ctx.stroke();
 
-        // --- LED BAR (Orange) ---
-        ctx.beginPath();
-        ctx.fillStyle = 'rgba(255, 165, 0, 0.4)'; ctx.strokeStyle = 'rgba(255, 165, 0, 0.8)'; ctx.lineWidth = 1;
-        ctx.moveTo(0, bottomBase);
-        for (let i = 0; i < ledData.length; i++) {
-            let h = (ledData[i] / NUM_LEDS) * scaleHeight;
-            let y = bottomBase - h;
+        // Label
+        ctx.fillStyle = '#bbb'; ctx.font = '10px Courier New'; ctx.textAlign = "left";
+        ctx.fillText("RAW ANALOG (" + currentBias + ")", 10, 15);
+
+
+        // --- ZONE 2: AMPLITUDE (Pink) ---
+
+        // Dyn Max Line
+        ctx.beginPath(); ctx.strokeStyle = '#0ff'; ctx.lineWidth = 1; ctx.setLineDash([2, 2]);
+        for (let i = 0; i < maxData.length; i++) {
+            let h = (maxData[i] / 1023) * scale2;
+            let y = base2 - h;
+            if (i === 0) ctx.moveTo(i, y); else ctx.lineTo(i, y);
+        }
+        ctx.stroke(); ctx.setLineDash([]);
+
+        // Amplitude
+        ctx.beginPath(); ctx.strokeStyle = '#ff00ff'; ctx.lineWidth = 1;
+        ctx.fillStyle = 'rgba(255, 0, 255, 0.1)';
+        ctx.moveTo(0, base2);
+        for (let i = 0; i < ampData.length; i++) {
+            let h = (ampData[i] / 1023) * scale2;
+            let y = base2 - h;
             ctx.lineTo(i, y);
         }
-        ctx.lineTo(rect.width, bottomBase); ctx.fill(); ctx.stroke();
+        ctx.lineTo(rect.width, base2); ctx.fill(); ctx.stroke();
 
-        // --- AMPLITUDE (Pink) ---
-        ctx.beginPath(); ctx.strokeStyle = '#ff00ff'; ctx.lineWidth = 2;
-        for (let i = 0; i < ampData.length; i++) {
-            let h = (ampData[i] / 1023) * scaleHeight;
-            let y = bottomBase - h;
-            if (i === 0) ctx.moveTo(i, y); else ctx.lineTo(i, y);
+        // Label
+        ctx.fillStyle = '#bbb';
+        ctx.fillText("MATH / PROCESSING", 10, floor1 + 15);
+        ctx.fillStyle = '#0ff'; ctx.textAlign = "right";
+        ctx.fillText("Dyn Max: " + currentMax, rect.width - 10, floor1 + 15);
+
+
+        // --- ZONE 3: LED OUTPUT (Orange) ---
+        ctx.beginPath();
+        ctx.fillStyle = 'rgba(255, 165, 0, 0.4)'; ctx.strokeStyle = 'rgba(255, 165, 0, 0.8)'; ctx.lineWidth = 1;
+        ctx.moveTo(0, base3);
+        for (let i = 0; i < ledData.length; i++) {
+            let h = (ledData[i] / NUM_LEDS) * scale3;
+            let y = base3 - h;
+            ctx.lineTo(i, y);
         }
-        ctx.stroke();
+        ctx.lineTo(rect.width, base3); ctx.fill(); ctx.stroke();
 
-        // --- PEAK DOT (White) ---
+        // Peak Dot
         ctx.beginPath(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
         for (let i = 0; i < peakData.length; i++) {
-            let h = (peakData[i] / NUM_LEDS) * scaleHeight;
-            let y = bottomBase - h;
+            let h = (peakData[i] / NUM_LEDS) * scale3;
+            let y = base3 - h;
             if (i === 0) ctx.moveTo(i, y); else ctx.lineTo(i, y);
         }
         ctx.stroke();
 
-        // --- INFO BOXES ---
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)'; ctx.fillRect(10, 10, 200, 24);
-        ctx.fillStyle = '#bbb'; ctx.font = '12px Courier New'; ctx.textAlign = "left";
-        ctx.fillText("Zero Point (Bias): " + currentBias, 20, 26);
+        // Label
+        ctx.fillStyle = '#bbb'; ctx.textAlign = "left";
+        ctx.fillText("LED OUTPUT", 10, floor2 + 15);
 
-        let rightMargin = 10;
-        let boxWidth = 220;
-        let startX = rect.width - boxWidth - rightMargin;
-        let startY = 10;
-        let lineHeight = 26;
 
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
-        ctx.fillRect(startX, startY, boxWidth, lineHeight * 4 + 5);
+        // --- STATS OVERLAY ---
+        let boxWidth = 200;
+        let startX = rect.width - boxWidth - 10;
+        let startY = floor2 + 10;
 
-        ctx.fillStyle = '#0ff'; ctx.font = 'bold 12px Courier New'; ctx.textAlign = "left";
-        ctx.fillText("Auto-Scaling Max: " + currentMax, startX + 10, startY + 16);
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+        ctx.fillRect(startX, startY, boxWidth, 80);
 
-        ctx.fillStyle = '#ff0';
-        ctx.fillText("Current LEDs Lit: " + currentLedLit, startX + 10, startY + 16 + lineHeight);
-
+        ctx.fillStyle = '#ff0'; ctx.font = '12px Courier New';
+        ctx.fillText("Current LEDs: " + currentLedLit, startX + 10, startY + 20);
         ctx.fillStyle = '#FFA500';
-        ctx.fillText("Max LEDs Lit:     " + maxLedLit, startX + 10, startY + 16 + lineHeight * 2);
-
+        ctx.fillText("Max LEDs:     " + maxLedLit, startX + 10, startY + 40);
         ctx.fillStyle = '#ccc';
-        ctx.fillText("Min LEDs Lit:     " + minLedLit, startX + 10, startY + 16 + lineHeight * 3);
+        ctx.fillText("Min LEDs:     " + minLedLit, startX + 10, startY + 60);
 
 
         // --- TOOLTIP ---
@@ -194,7 +229,6 @@
             let aVal = ampData[index];
             let lVal = ledData[index];
             let pVal = peakData[index];
-
             let histMax = maxData[index];
             let histBias = biasData[index];
 
@@ -229,14 +263,12 @@
                     rawData.push(r); rawData.shift(); ampData.push(a); ampData.shift();
                     ledData.push(l); ledData.shift(); peakData.push(p); peakData.shift();
 
-                    // Handle Globals
                     if (!isNaN(m)) currentMax = m;
                     if (!isNaN(z)) currentBias = z;
 
                     maxData.push(currentMax); maxData.shift();
                     biasData.push(currentBias); biasData.shift();
 
-                    // Stats
                     currentLedLit = l;
                     if (l === 0) {
                         minLedLit = 0; maxLedLit = 0;
@@ -252,7 +284,7 @@
 
     resetBtn.addEventListener('click', () => {
         rawData.fill(512); ampData.fill(0); ledData.fill(0); peakData.fill(0);
-        maxData.fill(100); biasData.fill(512); // Reset history
+        maxData.fill(100); biasData.fill(512);
         maxLedLit = 0; minLedLit = NUM_LEDS; currentLedLit = 0;
     });
 
